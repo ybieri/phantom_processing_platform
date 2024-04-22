@@ -20,7 +20,7 @@
 ## About
 The problem provides the phantom processing platform, which is a platform to report ghosts sightings. It consists of a sensor and processor component. Both binaries are compiled as ARM 32-bit and are running in a custom buildroot environment. 
 
-The sensor offers the user the following commands:
+The sensor offers the following commands to the user:
 
 ```c
 1. Add Ghost Data
@@ -44,7 +44,7 @@ pushd ./cpio_contents > /dev/null
 cat ../rootfs.cpio | cpio -idmv
 popd > /dev/null
 ```
-Afterwards, it's worth analyzing how the binaries are run. The file `S99start` was added to run on boot:
+Afterwards, it's worth analyzing how the binaries are run. The file [S99start](helpers/S99start) was added to run on boot:
 ```bash
 #!/bin/sh
 
@@ -64,7 +64,7 @@ start() {
 
 [...CUT...]
 ```
-It's noteworthy that it enables ASLR and sets the randomness to 10 bits. Afterwards it runs the start.sh script: 
+It's noteworthy that it enables ASLR and sets the randomness to 10 bits. Afterwards it runs the [start.sh](helpers/start.sh) script: 
 
 ```bash
 #!/bin/bash
@@ -74,7 +74,7 @@ SENSOR_PORT=1337
 socat TCP-LISTEN:${SENSOR_PORT},reuseaddr,fork EXEC:"setsid ./handle_connection.sh"
 ```
 
-This script uses socat to run the `handle_connection.sh` script:
+This script uses socat to run the [handle_connection.sh](helpers/handle_connection.sh) script:
 
 ```bash
 #!/bin/bash
@@ -103,7 +103,7 @@ sleep 0.1
 This script finally just starts the processor and sensor for the user to interact with.
 
 
-Running `checksec` on the processor and sensor binaries shows that both are compiled for arm-32-little endian and are compiled without stack canaries. This already hints at a buffer overflow. The other protections are enabled. 
+Running `checksec` on the processor and sensor binaries shows that both are compiled for arm-32 little endian and are compiled without stack canaries. This already hints at a buffer overflow. The other protections are enabled. 
 ```bash
 $ checksec processor_arm sensor_arm
 [*] 'processor_arm'
@@ -150,19 +150,19 @@ typedef enum {
 } GhostType;
 ```
 
-When selecting the types 0-7, a "default ghost" is added with a randomly selected title and description. If the value 8 is chosen, the title and description can be chonsen freely.
+When selecting the types 0-7, a "default ghost" is added with a randomly selected title and description. If the value 8 is chosen, the title and description can be chonsen freely by the user.
 
 ### Bug 1
-When a ghost is added, a symbol or emoji is added to the title, depending on how condifent the reporter is. To account for this, the sensor subtracts the length of the emoji from the title field:
+When a ghost is added, either a symbol or emoji is appended to its title. If the sensor is in "legacy" mode, a symbol (++,+,~,-,--) is appended. In "modern modde" an emoji is appended instead. To account for this, the sensor subtracts the length of the emoji from the title field:
 ```c
 printf("Enter title of your ghost observation report: \n");
-    if (readInput(packet->title, TITLE_LEN-strlen(EMOJI_99)) <= 0) {
-        printf("Failed to read title.\n");
-        return -1;
-    }
+if (readInput(packet->title, TITLE_LEN-strlen(EMOJI_99)) <= 0) {
+   printf("Failed to read title.\n");
+   return -1;
+}
 ```
 
-Afterward, the processor appends the emoji:
+The processor then appends the emoji or symbol to the title, depending on the current "mode":
 ```c
 #define EMOJI_99 "😁👻"
 #define EMOJI_75 "🤔👻"
@@ -200,11 +200,11 @@ void appendEmoji(GhostPacket* packet) {
     }
 }
 ```
-The issue is, that `EMOJI_0` is 11 characters long while all other emojies are only 9 characters long. Thus, when operating in "modern mode" with confidence lower than 5, the `title` field will overflow 2 bytes into the `type` fields.
-`EMOJI_0` translates to `E2 98 B9 EF B8 8F F0 9F 91 BB` or `-30 -104 -71 -17 -72 -113 -16 -97 -111 -69`. Thus, when overflowing, the type of the ghost will be set to `-69`.
+The issue is, that `EMOJI_0` is 11 characters long while all other emojies are only 9 characters long. Thus, when operating in "modern mode" with confidence lower than 5, the `title` field will overflow 2 bytes into the `type` field.
+`EMOJI_0`'s byte representation is `E2 98 B9 EF B8 8F F0 9F 91 BB` or `-30 -104 -71 -17 -72 -113 -16 -97 -111 -69`. Thus, when overflowing, the type of the ghost will be set to `-69`.
 
 ### Bug 2
-This brings us to the second bug. When a default ghost is created in the sensor, it will be assigned a description and a random trait, separated by a `~` character. The processor then uses `sscanf` to parse the description and trait into two buffers, each half as large as the whole description. While this will never be an issue for a "default ghost", if an attacker can control the description, they will be able to create a buffer overflow.
+This brings us to the second bug. When a default ghost is created in the sensor, it will be assigned a description and a random trait. The two values are separated by a `~` character. The processor then uses `sscanf` to parse the description and trait into two buffers, each half as large as the whole description. While this will never be an issue for a "default ghost", if an attacker could control the description, they will be able to create a buffer overflow scenario.
 
 ```c
 void extractAndMatchTraits(const GhostPacket* packet, int traitOccurrences[NUM_DEFAULT_GHOSTS][TRAITS_PER_GHOST]) {
@@ -225,10 +225,10 @@ void extractAndMatchTraits(const GhostPacket* packet, int traitOccurrences[NUM_D
     }
 }
 ```
-Normally, only "default ghosts" will have a trait, and only their description will be passed to `sscanf`. But the check `if (packet->type < CUSTOM_GHOST)` does not account for negative `type` values. Thus, an attacker can use bug 1 to overflow `type` to be nagative (-69) and then add a long description. This will trigger and overflow when being parsed by `sscanf` into the two stack buffers.
+Normally, only the `description` of "default ghosts" will be passed to `sscanf`. But the check `if (packet->type < CUSTOM_GHOST)` does not account for negative `type` values. Thus, an attacker can use bug 1 to overflow `type` to be nagative (-69) and set a long description for this ghost. Because the `processor` wrongfully assumes that a negative index belongs to a "custom ghost", it will parse the description using `sscanf`, which overflows one of the two stack buffers.
 
 ## Exploitation
-The exploitation seems quite simple now, but there is one more issue to overcome. The processor does validate every `GhostPacket` it receives:
+The exploitation seems quite simple now, but there is one more issue. The processor does validate every `GhostPacket` it receives:
 
 ```c
 int validateGhostPacket(GhostPacket* newPacket) {
@@ -262,11 +262,11 @@ int validateGhostPacket(GhostPacket* newPacket) {
 ```
 Important for us is the check on the description. The processor ensures that the description field only contains UTF-8 characters. This will make exploitation a lot more complex.
 
-The processor is compiled with ASLR, but we recall from the `S99start` script, that only 10 bits of randomness are set. Therefore, no leak is required but a 1/1024 bruteforce can be used.
+The processor is compiled with ASLR, but we recall from the [S99start](helpers/S99start) script, that only 10 bits of randomness are set. Therefore, no leak is required but a `1/1024` bruteforce can be used instead.
 
 When trying to find gadgets that are UTF-8 encodable, it is imortant to understand how UTF-8 works. The 1-byte UTF-8 range is from `0x00-0x7f`. This will most likely not be enough to encode meaningful gadgets. But there is also 2, 3, and 4 byte UTF-8 characters. Those allow to encode 1 to 2 arbitrary bytes, while clobbering the next byte. Have a look at [UTF-8 Wikipedia](https://en.wikipedia.org/wiki/UTF-8) for a better explanation.
 
-There is multiple ways to find gadgets now. My approach was to run ropper on `libc` to create extract all gadgets first. Afterwards, I wrote a small script [gadget helper.py](gadget_helper.py) that adds all 1024 ASLR offsets to the gadgets. For each offset it checks for each gadget if it is UTF-8 encodable. If so, it writes the gadgets to a new file. To reduce the number of files, I excluded ALSR offsets, where `system` was not UTF-8 encodable. 
+There are multiple ways to find gadgets now. My approach was to run ropper on `libc` to extract all gadgets first. Afterwards, I wrote a small script [gadget helper.py](gadget_helper.py) that adds all 1024 ASLR offsets to the gadgets. For each offset it checks whether each gadget is UTF-8 encodable. If so, it writes the gadgets to a new file. To reduce the number of files, I excluded ALSR offsets, where `system` was not UTF-8 encodable. 
 
 I then came up with the following gadget chain at ALSR offset 32:
 ```python
