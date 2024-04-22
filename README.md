@@ -7,7 +7,7 @@
 ![](https://img.shields.io/badge/Testers-babaisflag-blueviolet)
 ![](https://img.shields.io/badge/Flag-375%20points%2C%206%20solves-orange)
 
-<img src="https://raw.githubusercontent.com/ybieri/phantom_processing_platform/master/phantom.png" width=50%">
+<img src="https://raw.githubusercontent.com/ybieri/phantom_processing_platform/master/phantom.png" width=50%>
 
 ## Flavor Text
 
